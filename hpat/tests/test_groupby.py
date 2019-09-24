@@ -305,8 +305,6 @@ class TestGroupBy(unittest.TestCase):
         self.assertEqual(count_array_REPs(), 0)
         self.assertEqual(count_parfor_REPs(), 0)
 
-    @unittest.skip('Error - fix needed\n'
-                   'NUMA_PES=3 build')
     def test_muti_hiframes_node_filter_agg(self):
         def test_impl(df, cond):
             df2 = df[cond]
@@ -343,8 +341,6 @@ class TestGroupBy(unittest.TestCase):
         # np.testing.assert_array_equal(hpat_func(df), test_impl(df))
         self.assertEqual(set(hpat_func(df)), set(test_impl(df)))
 
-    @unittest.skip('Error - fix needed\n'
-                   'NUMA_PES=3 build')
     def test_pivot(self):
         def test_impl(df):
             pt = df.pivot_table(index='A', columns='C', values='D', aggfunc='sum')
@@ -356,8 +352,6 @@ class TestGroupBy(unittest.TestCase):
         self.assertEqual(
             set(hpat_func(_pivot_df1)[1]), set(test_impl(_pivot_df1)[1]))
 
-    @unittest.skip('Error - fix needed\n'
-                   'NUMA_PES=3 build')
     def test_pivot_parallel(self):
         def test_impl():
             df = pd.read_parquet("pivot2.pq")
@@ -380,8 +374,6 @@ class TestGroupBy(unittest.TestCase):
         self.assertEqual(
             set(hpat_func(_pivot_df1)[1]), set(test_impl(_pivot_df1)[1]))
 
-    @unittest.skip('Error - fix needed\n'
-                   'NUMA_PES=3 build')
     def test_crosstab_parallel1(self):
         def test_impl():
             df = pd.read_parquet("pivot2.pq")
@@ -392,6 +384,16 @@ class TestGroupBy(unittest.TestCase):
         hpat_func = hpat.jit(
             pivots={'pt': ['small', 'large']})(test_impl)
         self.assertEqual(hpat_func(), test_impl())
+
+    @unittest.skip("Implement groupby(lambda) for DataFrame")
+    def test_groupby_lambda(self):
+        def test_impl(df):
+            group = df.groupby(lambda x: x % 2 == 0)
+            return group.count()
+
+        df = pd.DataFrame({'A': [2, 1, 1, 1, 2, 2, 1], 'B': [-8, 2, 3, 1, 5, 6, 7]})
+        hpat_func = hpat.jit(test_impl)
+        pd.testing.assert_frame_equal(hpat_func(df), test_impl(df))
 
 
 if __name__ == "__main__":

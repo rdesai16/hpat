@@ -294,15 +294,14 @@ class DataFramePass(object):
             in_arr = self._get_dataframe_data(df_var, col_name, nodes)
 
             if guard(is_whole_slice, self.typemap, self.func_ir, col_filter_var):
-                def func(A, ind, name): return hpat.hiframes.api.init_series(
-                    A, None, name)
+                def func(A, ind, name):
+                    return hpat.hiframes.api.init_series(A, None, name)
             else:
                 # TODO: test this case
-                def func(A, ind, name): return hpat.hiframes.api.init_series(
-                    A[ind], None, name)
+                def func(A, ind, name):
+                    return hpat.hiframes.api.init_series(A[ind], None, name)
 
-            return self._replace_func(func,
-                                      [in_arr, col_filter_var, name_var], pre_nodes=nodes)
+            return self._replace_func(func, [in_arr, col_filter_var, name_var], pre_nodes=nodes)
 
         if self._is_df_iat_var(rhs.value):
             df_var = guard(get_definition, self.func_ir, rhs.value).value
@@ -608,6 +607,9 @@ class DataFramePass(object):
         if fdef == ('mean_dummy', 'hpat.hiframes.pd_dataframe_ext'):
             return self._run_call_col_reduce(assign, lhs, rhs, 'mean')
 
+        if fdef == ('median_dummy', 'hpat.hiframes.pd_dataframe_ext'):
+            return self._run_call_col_reduce(assign, lhs, rhs, 'median')
+
         if fdef == ('std_dummy', 'hpat.hiframes.pd_dataframe_ext'):
             return self._run_call_col_reduce(assign, lhs, rhs, 'std')
 
@@ -819,6 +821,19 @@ class DataFramePass(object):
                                       pysig=numba.utils.pysignature(stub),
                                       kws=dict(rhs.kws))
 
+        if func_name == 'median':
+            rhs.args.insert(0, df_var)
+            arg_typs = tuple(self.typemap[v.name] for v in rhs.args)
+            kw_typs = {name: self.typemap[v.name]
+                       for name, v in dict(rhs.kws).items()}
+            impl = hpat.hiframes.pd_dataframe_ext.median_overload(
+                *arg_typs, **kw_typs)
+            stub = (lambda df, axis=None, skipna=None, level=None,
+                    numeric_only=None: None)
+            return self._replace_func(impl, rhs.args,
+                                      pysig=numba.utils.pysignature(stub),
+                                      kws=dict(rhs.kws))
+
         if func_name == 'std':
             rhs.args.insert(0, df_var)
             arg_typs = tuple(self.typemap[v.name] for v in rhs.args)
@@ -1010,8 +1025,11 @@ class DataFramePass(object):
         """
         df_typ = self.typemap[df_var.name]
         # check for no arg or just include='all'
-        if not (len(rhs.args) == 0 and (len(rhs.kws) == 0 or (len(rhs.kws) ==
-                                                              1 and rhs.kws[0][0] == 'include' and guard(find_const, self.func_ir, rhs.kws[0][1]) == 'all'))):
+        if not (len(rhs.args) == 0
+                and (len(rhs.kws) == 0
+                     or (len(rhs.kws) == 1
+                         and rhs.kws[0][0] == 'include'
+                         and guard(find_const, self.func_ir, rhs.kws[0][1]) == 'all'))):
             raise ValueError("only describe() with include='all' supported")
 
         col_name_args = ["c" + str(i) for i in range(len(df_typ.columns))]
@@ -1196,7 +1214,7 @@ class DataFramePass(object):
         n_cols = len(df_typ.columns)
         data_args = tuple('data{}'.format(i) for i in range(n_cols))
 
-        func_text = "def _mean_impl({}):\n".format(", ".join(data_args))
+        func_text = "def _reduce_impl({}):\n".format(", ".join(data_args))
         for d in data_args:
             func_text += "  {} = hpat.hiframes.api.init_series({})\n".format(d + '_S', d)
             func_text += "  {} = {}.{}()\n".format(d + '_O', d + '_S', func_name)
@@ -1207,11 +1225,11 @@ class DataFramePass(object):
         func_text += "  return hpat.hiframes.api.init_series(data, index)\n"
         loc_vars = {}
         exec(func_text, {}, loc_vars)
-        _mean_impl = loc_vars['_mean_impl']
+        _reduce_impl = loc_vars['_reduce_impl']
 
         nodes = []
         col_vars = [self._get_dataframe_data(df_var, c, nodes) for c in df_typ.columns]
-        return self._replace_func(_mean_impl, col_vars, pre_nodes=nodes)
+        return self._replace_func(_reduce_impl, col_vars, pre_nodes=nodes)
 
     def _run_call_df_fillna(self, assign, lhs, rhs):
         df_var = rhs.args[0]
@@ -1360,10 +1378,16 @@ class DataFramePass(object):
 
         out_vars = []
         data = [self._get_dataframe_data(df_var, c, nodes) for c in df_typ.columns]
-        def isin_func(A, B): return hpat.hiframes.api.df_isin(A, B)
-        def isin_vals_func(A, B): return hpat.hiframes.api.df_isin_vals(A, B)
+
+        def isin_func(A, B):
+            return hpat.hiframes.api.df_isin(A, B)
+
+        def isin_vals_func(A, B):
+            return hpat.hiframes.api.df_isin_vals(A, B)
         # create array of False values used when other col not available
-        def bool_arr_func(A): return np.zeros(len(A), np.bool_)
+
+        def bool_arr_func(A):
+            return np.zeros(len(A), np.bool_)
         # use the first array of df to get len. TODO: check for empty df
         false_arr_args = [data[0]]
 
@@ -1826,7 +1850,8 @@ class DataFramePass(object):
 
         # generate a concat call for each output column
         # TODO: support non-numericals like string
-        def gen_nan_func(A): return np.full(len(A), np.nan)
+        def gen_nan_func(A):
+            return np.full(len(A), np.nan)
         # gen concat function
         arg_names = ", ".join(['in{}'.format(i) for i in range(len(df_list))])
         func_text = "def _concat_imp({}):\n".format(arg_names)
