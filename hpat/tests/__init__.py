@@ -14,3 +14,6 @@ from hpat.tests.test_rolling import *
 from hpat.tests.test_ml import *
 
 from hpat.tests.test_io import *
+
+from hpat.tests.test_hpat_jit import *
+from hpat.tests.tests_perf.test_perf_unicode import *
